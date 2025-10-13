@@ -29,8 +29,8 @@ extra:
 
 theme:
   name: material
-  logo: docs/assets/rn-favicon.svg
-  favicon: docs/assets/rn-favicon.svg
+  logo: https://raw.githubusercontent.com/RadicalNumerics/assets/refs/heads/main/svg/favicon.svg
+  favicon: https://raw.githubusercontent.com/RadicalNumerics/assets/refs/heads/main/svg/favicon.svg
   primary: red
   features:
     - announce.dismiss

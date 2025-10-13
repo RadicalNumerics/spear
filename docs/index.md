@@ -12,23 +12,32 @@ hide:
 }
 </style>
 </div><p align="center">
-  <img width=500 alt="Spear Logo" src="./assets/spear-logo.svg" />
+  <img width=500 alt="Spear Logo" src="https://raw.githubusercontent.com/RadicalNumerics/assets/refs/heads/main/svg/spear-logo.svg" />
 </p>
 
 
 SPEAR is a collection of kernels for AI model architectures developed by Radical Numerics.
 
 
-
 ## Installation
 
+You may use PyPI to install SPEAR:
+
 ```bash
-uv venv
-source .venv/bin/activate
-uv pip install -e '.[dev]'
+pip install spear-python
 ```
 
-where `.[dev]` installs all dependencies for development mode; can be simplified to `uv pip install -e .`
+Note that it will take few minutes to compile kernels for your specific GPU architecture.
+
+
+You may also install it locally using the following method to install the package in development mode:
+
+```bash
+git clone https://github.com/radicalnumerics/spear.git && cd spear # clone the repository
+uv venv && source .venv/bin/activate # virtual env with uv (recommended)
+uv pip install -e '.[dev]' # install in development mode
+```
+
 
 ### Caching
 
@@ -95,8 +104,8 @@ Currently supported hardware includes compute capabilities 9.0 (Hopper) and 10.0
 
 | Kernel Name       |  (NVIDIA) sm9.0 |  (NVIDIA) sm10.0 |  (NVIDIA) sm10.3 |
 | ----------------- | :-----: | :-----: | :-----: |
-| `swr.btp.fwd.bf16.bdl.hd16-bl16.sm90` | ✔︎ |  ~ |  ⛔| 
-| `swr.btp.bwd.bf16.bdl.hd16-bl16.sm90`  | ✔︎ | ~ |  ⛔ | 
+| `swr.btp.fwd.bf16.bdl.hd16-bl16.sm90` | ✔︎ |  ~ |  ⛔|
+| `swr.btp.bwd.bf16.bdl.hd16-bl16.sm90`  | ✔︎ | ~ |  ⛔ |
 
 * ✔︎: optimized
 * ~: working but not fully optimized
@@ -106,6 +115,6 @@ Currently supported hardware includes compute capabilities 9.0 (Hopper) and 10.0
 ---
 
 <p align="center">
-  <img width=350 alt="Radical Numerics Logo" src="./assets/rn-logo-desktop-vector.svg" />
+  <img width=350 alt="Radical Numerics Logo" src="https://raw.githubusercontent.com/RadicalNumerics/assets/refs/heads/main/svg/rn-logo-desktop-vector-animated.svg" />
 </p>
 

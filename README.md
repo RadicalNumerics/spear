@@ -1,5 +1,5 @@
 <p align="center">
-  <img width=500 alt="Spear Logo" src="docs/assets/spear-logo.svg" />
+  <img width=500 alt="Spear Logo" src="https://raw.githubusercontent.com/RadicalNumerics/assets/refs/heads/main/svg/spear-logo.svg" />
 </p>
 
 
@@ -91,8 +91,8 @@ Currently supported hardware includes compute capabilities 9.0 (Hopper) and 10.0
 
 | Kernel Name       |  (NVIDIA) sm9.0 |  (NVIDIA) sm10.0 |  (NVIDIA) sm10.3 |
 | ----------------- | :-----: | :-----: | :-----: |
-| `swr.btp.fwd.bf16.bdl.hd16-bl16.sm90` | ✔︎ |  ~ |  ⛔| 
-| `swr.btp.bwd.bf16.bdl.hd16-bl16.sm90`  | ✔︎ | ~ |  ⛔ | 
+| `swr.btp.fwd.bf16.bdl.hd16-bl16.sm90` | ✔︎ |  ~ |  ⛔|
+| `swr.btp.bwd.bf16.bdl.hd16-bl16.sm90`  | ✔︎ | ~ |  ⛔ |
 
 * ✔︎: optimized
 * ~: working but not fully optimized
@@ -102,6 +102,6 @@ Currently supported hardware includes compute capabilities 9.0 (Hopper) and 10.0
 ---
 
 <p align="center">
-  <img width=350 alt="Radical Numerics Logo" src="docs/assets/rn-logo-desktop-vector.svg" />
+  <img width=350 alt="Radical Numerics Logo" src="https://raw.githubusercontent.com/RadicalNumerics/assets/refs/heads/main/svg/rn-logo-desktop-vector-animated.svg" />
 </p>
 
