@@ -1,0 +1,116 @@
+[build-system]
+requires = [
+    "setuptools>=77.0.3",
+    "packaging>=24.2",
+    "torch",
+    "psutil",
+    "nvidia-cutlass @ git+https://github.com/NVIDIA/cutlass", # needed for build -- this downloads headers
+    "ninja",
+    "pybind11",
+    "cmake>=3.26.1",
+    "matplotlib>=3.5.0",
+]
+build-backend = "setuptools.build_meta"
+
+# If you want setup.py to handle something, do not add it here
+# **only** what is in `dynamic` will be dealt with by `setup.py`
+[project]
+name = "spear-python"
+description = "SPEAR: Structured Primitives for Efficient Architecture Research"
+readme = "README.md"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Radical Numerics Inc."},
+]
+dynamic = ["version", "dependencies"]
+requires-python = ">=3.10"
+keywords = ["cuda", "kernels", "linear-algebra", "machine-learning", "pytorch"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.13.2",
+    "jupyterlab>=3.0",
+    "pre-commit>=4.0.0",
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
+]
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocstrings-python",
+    "mike",
+    "mkdocs-jupyter",
+    "mkdocs-redirects",
+    "mkdocs-autolinks-plugin",
+    "griffe-typingdoc",
+    "griffe-inherited-docstrings",
+    "griffe",
+    "black",
+    "mkdocs-same-dir",
+    "mdx-breakless-lists",
+    "mdx-truly-sane-lists",
+    "markdown-gfm-admonition",
+]
+
+
+# This is necessary because nvidia-cutlass installed like this will download the headers too
+# -> Much more convenient than having submodules
+[tool.uv.sources]
+nvidia-cutlass = { git = "ssh://git@github.com/nvidia/cutlass"}
+
+[tool.uv]
+no-build-isolation-package = ["torch"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+show-fixes = false
+extend-exclude = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I001", "UP"]
+ignore = ["E501"]  # never enforce `E501` (line length violations), handled by Black
+task-tags = ["TODO", "FIXME"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402", "F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = []
+known-third-party = []
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "first-party",
+    "local-folder",
+]
+combine-as-imports = true
+split-on-trailing-comma = false
+lines-between-types = 1
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    # Allow our specific known issue warnings to show, but suppress other warnings
+    "-W", "default::UserWarning",
+    "-W", "ignore::DeprecationWarning",
+    "-W", "ignore::PendingDeprecationWarning",
+    # Coverage reporting
+    "--cov=spear",
+    "--cov-report=term-missing",
+]
+

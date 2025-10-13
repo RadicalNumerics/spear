@@ -1,0 +1,14 @@
+---
+hide:
+- navigation
+- toc
+---
+
+<div>
+<style type="text/css">
+.md-typeset h1,
+.md-content__button {
+    display: none;
+}
+</style>
+</div>
