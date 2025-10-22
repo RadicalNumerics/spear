@@ -18,6 +18,7 @@ build-backend = "setuptools.build_meta"
 name = "spear-python"
 description = "SPEAR: Structured Primitives for Efficient Architecture Research"
 readme = "README.md"
+license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [
     {name = "Radical Numerics Inc."},
@@ -66,7 +67,7 @@ docs = [
 # This is necessary because nvidia-cutlass installed like this will download the headers too
 # -> Much more convenient than having submodules
 [tool.uv.sources]
-nvidia-cutlass = { git = "ssh://git@github.com/nvidia/cutlass"}
+nvidia-cutlass = { git = "https://github.com/nvidia/cutlass"}
 
 [tool.uv]
 no-build-isolation-package = ["torch"]
