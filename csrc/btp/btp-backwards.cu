@@ -90,9 +90,10 @@ struct BackwardWarpSmem {
 template <int DH_VAL>
 struct alignas(64) ClusterCommsBwd {
   // Barrier for incoming data from the RIGHT (CTA R+1)
-  alignas(16) cute::uint64_t ingress_barrier;
+  alignas(16) cute::uint64_t ingress_barrier_words[2];
   // Buffer for incoming data from the RIGHT (CTA R+1)
   alignas(16) float ingress_dCarry[DH_VAL];
+  static_assert(sizeof(ingress_barrier_words) == 16, "must be 16 bytes for alignment");
 };
 
 // Final Block Layout
@@ -208,7 +209,7 @@ __global__ void btp_backward_kernel(const ElementT* __restrict__ g_coeff,
   // [DSMEM] SMEM pointers
   auto* warp_smem = &smem->warp_storage[warp_id];
   auto* local_comms = &smem->cluster_comms;
-  cute::uint64_t* local_barrier = &local_comms->ingress_barrier;
+  cute::uint64_t* local_barrier = &local_comms->ingress_barrier_words[0];
 
   // Pointers for WMMA inputs (used for dX)
   ElementT* A_tile = warp_smem->wmma_inputs.A_tile;
