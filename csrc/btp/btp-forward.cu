@@ -64,10 +64,11 @@ struct WarpSmemFwd {
 
 // DSMEM-visible comms
 template <int DH_VAL>
-struct alignas(64) ClusterCommsFwd {
+struct alignas(32) ClusterCommsFwd {
   // mbarrier must be 16B aligned for use with async operations.
-  alignas(16) cute::uint64_t ingress_barrier;
-  alignas(16) float ingress_carry[DH_VAL];
+  alignas(16) cute::uint64_t ingress_barrier_words[2];
+  alignas(32) float ingress_carry[DH_VAL];
+  static_assert(sizeof(ingress_barrier_words) == 16, "must be 16 bytes for alignment");
 };
 
 template <typename ElementT, int WPB>
@@ -108,7 +109,7 @@ __global__ void btp_forward_kernel(ElementT const* __restrict__ coeff,
   using SmemLayout = BlockSmemFwd<ElementT, WarpsPerBlock>;
   SmemLayout* block_smem = reinterpret_cast<SmemLayout*>(smem);
   auto* local_comms = &block_smem->cluster_comms;
-  cute::uint64_t* local_barrier = &local_comms->ingress_barrier;
+  cute::uint64_t* local_barrier = &local_comms->ingress_barrier_words[0];
 
   // Barrier phase: Initial phase is 0. We wait for this phase to complete.
   const int wait_phase = 0;
@@ -119,8 +120,13 @@ __global__ void btp_forward_kernel(ElementT const* __restrict__ coeff,
     if (threadIdx.x == 0) {
       // Determine expected arrivals. Rank > 0 expects 1 arrival (from the
       // single cp.async.bulk).
-      const uint32_t expected_arrivals = (cluster_rank > 0) ? 1u : 0u;
-
+      const int tiles_per_seq_init = (L + BL - 1) / BL;
+      const int cta_first_tile_init = blockIdx.x * WarpsPerBlock;
+      int cta_tiles_init = tiles_per_seq_init - cta_first_tile_init;
+      cta_tiles_init = (cta_tiles_init < 0) ? 0 : ((cta_tiles_init > WarpsPerBlock) ? WarpsPerBlock : cta_tiles_init);
+      const bool has_prev_cta = (cta_first_tile_init > 0);
+      const bool cta_expects_arrival = (cluster_rank > 0) && (cta_tiles_init > 0) && has_prev_cta;
+      const uint32_t expected_arrivals = cta_expects_arrival ? 1u : 0u;
       // 1. Initialize the barrier.
       cute::initialize_barrier(*local_barrier, expected_arrivals);
 
@@ -314,10 +320,20 @@ __global__ void btp_forward_kernel(ElementT const* __restrict__ coeff,
     // Sync 3: Ensure the send (if any) is initiated before we start waiting.
     __syncthreads();
 
-    // If this CTA expects data (cluster_rank > 0), we must wait for it.
-    if (cluster_rank > 0) {
-      // Wait for the completion of the initial phase (Phase 0).
-      cute::wait_barrier(*local_barrier, wait_phase);
+    // If this CTA expects data precisely, wait then acquire DSMEM visibility.
+    {
+      const int tiles_per_seq_wait = (L + BL - 1) / BL;
+      const int cta_first_tile_wait = blockIdx.x * WarpsPerBlock;
+      int cta_tiles_wait = tiles_per_seq_wait - cta_first_tile_wait;
+      cta_tiles_wait = (cta_tiles_wait < 0) ? 0 : ((cta_tiles_wait > WarpsPerBlock) ? WarpsPerBlock : cta_tiles_wait);
+      const bool has_prev_cta = (cta_first_tile_wait > 0);
+      const bool cta_expects_arrival = (cluster_rank > 0) && (cta_tiles_wait > 0) && has_prev_cta;
+      if (cta_expects_arrival) {
+        // Wait for the completion of the initial phase (Phase 0).
+        cute::wait_barrier(*local_barrier, wait_phase);
+        // Acquire visibility before reading DSMEM.
+        cute::cluster_sync();
+      }
     }
 
     // 5.2 Consumer Data Loading (Warp level)
