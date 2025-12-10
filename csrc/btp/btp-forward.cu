@@ -86,7 +86,7 @@ template <typename ElementT, typename ElementO, int WarpsPerBlock>
 __global__ void btp_forward_kernel(ElementT const* __restrict__ coeff,
                                    ElementT const* __restrict__ x, ElementO* __restrict__ y,
                                    float* __restrict__ checkpoint_carry, int H, int L, int k,
-                                   int cluster_size_param) {
+                                   int cluster_size_param, bool reverse) {
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 900)
   return;  // DSMEM path requires Hopper+.
 #endif
@@ -157,8 +157,12 @@ __global__ void btp_forward_kernel(ElementT const* __restrict__ coeff,
 
   const int bh_idx = blockIdx.y;
   const long bh_idx_ll = static_cast<long>(bh_idx);
-  const long coeff_off = bh_idx_ll * L + tile_start;
-  const long x_off = bh_idx_ll * (long)DH * L + tile_start;
+  // Base offsets for this batch/head (without tile position - we'll compute per-element)
+  const long coeff_base = bh_idx_ll * L;
+  const long x_base = bh_idx_ll * (long)DH * L;
+  // Legacy offsets for non-reverse mode
+  const long coeff_off = coeff_base + tile_start;
+  const long x_off = x_base + tile_start;
   const long BH_off_CP = bh_idx_ll * (L / BL) * (long)DH;
 
   // Warp-local views
@@ -172,6 +176,9 @@ __global__ void btp_forward_kernel(ElementT const* __restrict__ coeff,
   // (Implementation optimized in v1.3)
 
   // 1) log(a_t) and prefix sum
+  // Note: Coefficients are NOT reversed in reverse mode.
+  // Only input x and output y positions are reversed.
+  // This matches the behavior of: y = flip(L @ flip(x))
   float log_a_lane = 0.0f;
   if (tile_valid && lane < BL && tile_start + lane < L) {
     float a = static_cast<float>(coeff[coeff_off + lane]);
@@ -243,12 +250,14 @@ __global__ void btp_forward_kernel(ElementT const* __restrict__ coeff,
     }
   }
 
-  // 3) Load B
+  // 3) Load B (input x)
   if (tile_valid) {
     for (int idx = lane; idx < DH * BL; idx += 32) {
-      int t = idx % BL;
-      int c = idx / BL;
-      B_tile[idx] = (tile_start + t < L) ? x[x_off + (long)c * L + t] : ElementT(0.0f);
+      int t = idx % BL;  // local position within tile
+      int c = idx / BL;  // channel index
+      // For reverse mode, read from reversed global positions
+      const long global_t = reverse ? (L - 1 - (tile_start + t)) : (tile_start + t);
+      B_tile[idx] = (tile_start + t < L) ? x[x_base + (long)c * L + global_t] : ElementT(0.0f);
     }
   }
 
@@ -439,14 +448,15 @@ __global__ void btp_forward_kernel(ElementT const* __restrict__ coeff,
   __syncwarp();
 
   // 6) Store to global
-  const long y_off = x_off;
   if (tile_valid) {
     for (int idx = lane; idx < DH * BL; idx += 32) {
-      int c = idx / BL;
-      int r = idx % BL;
+      int c = idx / BL;  // channel index
+      int r = idx % BL;  // local position within tile
       if (tile_start + r < L) {
         float v = C_T[c * BL_P + r];
-        y[y_off + (long)c * L + r] = static_cast<ElementO>(v);
+        // For reverse mode, write to reversed global positions
+        const long global_r = reverse ? (L - 1 - (tile_start + r)) : (tile_start + r);
+        y[x_base + (long)c * L + global_r] = static_cast<ElementO>(v);
       }
     }
   }
@@ -462,7 +472,7 @@ __global__ void btp_forward_kernel(ElementT const* __restrict__ coeff,
 template <typename ElementT, typename ElementO, int WarpsPerBlock>
 void launch_block_two_pass(ElementT const* coeff, ElementT const* x, ElementO* y,
                            float* checkpoint_carry, int B, int H, int L, int k,
-                           cudaStream_t stream = 0) {
+                           bool reverse, cudaStream_t stream = 0) {
   if (L <= 0 || B * H <= 0) return;
 
   constexpr int WPB = WarpsPerBlock;
@@ -523,13 +533,13 @@ void launch_block_two_pass(ElementT const* coeff, ElementT const* x, ElementO* y
   cutlass::launch_kernel_on_cluster({grid_dims, block_dims, cluster_dims, smem_bytes, stream},
                                     kernel_ptr,
                                     // Kernel arguments:
-                                    coeff, x, y, checkpoint_carry, H, L, k, int(cluster_dims.x));
+                                    coeff, x, y, checkpoint_carry, H, L, k, int(cluster_dims.x), reverse);
 }
 
 // Explicit instantiations
 #define INSTANTIATE_BTP_FWD(T, O, WPB)                                                          \
   template void launch_block_two_pass<T, O, WPB>(T const*, T const*, O*, float*, int, int, int, \
-                                                 int, cudaStream_t);
+                                                 int, bool, cudaStream_t);
 
 #define INSTANTIATE_ALL_WPB(T, O) \
   INSTANTIATE_BTP_FWD(T, O, 4)    \

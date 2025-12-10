@@ -7,6 +7,9 @@
 #include <cuda_runtime.h>
 #include <cutlass/numeric_types.h>
 #include <torch/extension.h>
+#include <pybind11/pybind11.h>
+
+namespace py = pybind11;
 
 #include "btp-backwards.cu"
 #include "btp-forward.cu"
@@ -59,22 +62,22 @@ static inline void check_common_backward(const torch::Tensor& coeff, const torch
               "dy must be float32 or match x dtype.");
 }
 
-#define DISPATCH_WPB_FWD(WPB_VAL, ElementT, ElementO)                                              \
-  case WPB_VAL: {                                                                                  \
-    sss::launch_block_two_pass<ElementT, ElementO, WPB_VAL>(coeff_ptr, x_ptr, y_ptr,               \
-                                                            checkpoint_ptr, B, H, L, k32, stream); \
-    break;                                                                                         \
+#define DISPATCH_WPB_FWD(WPB_VAL, ElementT, ElementO)                                                       \
+  case WPB_VAL: {                                                                                           \
+    sss::launch_block_two_pass<ElementT, ElementO, WPB_VAL>(coeff_ptr, x_ptr, y_ptr,                        \
+                                                            checkpoint_ptr, B, H, L, k32, reverse, stream); \
+    break;                                                                                                  \
   }
 
-#define DISPATCH_WPB_BWD(WPB_VAL, ElementT, ElementO)                                    \
-  case WPB_VAL: {                                                                        \
-    sss::launch_btp_backward<ElementT, ElementO, 16, WPB_VAL>(                           \
-        coeff_ptr, x_ptr, dy_ptr, checkpoint_ptr, dx_ptr, dA_ptr, B, H, L, k32, stream); \
-    break;                                                                               \
+#define DISPATCH_WPB_BWD(WPB_VAL, ElementT, ElementO)                                             \
+  case WPB_VAL: {                                                                                 \
+    sss::launch_btp_backward<ElementT, ElementO, 16, WPB_VAL>(                                    \
+        coeff_ptr, x_ptr, dy_ptr, checkpoint_ptr, dx_ptr, dA_ptr, B, H, L, k32, reverse, stream); \
+    break;                                                                                        \
   }
 
 void btp_forward(torch::Tensor coeff, torch::Tensor x, torch::Tensor y, torch::Tensor checkpoint,
-                 int64_t k, int64_t wpb) {
+                 int64_t k, int64_t wpb, bool reverse) {
   check_common_forward(coeff, x, y, checkpoint, k, wpb);
 
   const int B = static_cast<int>(x.size(0));
@@ -150,7 +153,7 @@ void btp_forward(torch::Tensor coeff, torch::Tensor x, torch::Tensor y, torch::T
 }
 
 void btp_backward(torch::Tensor coeff, torch::Tensor x, torch::Tensor dy, torch::Tensor checkpoint,
-                  torch::Tensor dx, torch::Tensor dA, int64_t k, int64_t wpb) {
+                  torch::Tensor dx, torch::Tensor dA, int64_t k, int64_t wpb, bool reverse) {
   check_common_backward(coeff, x, dy, checkpoint, dx, dA, k, wpb);
 
   const int B = static_cast<int>(x.size(0));
@@ -238,6 +241,10 @@ void btp_backward(torch::Tensor coeff, torch::Tensor x, torch::Tensor dy, torch:
 
 // Python bindings
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("forward", &btp_forward, "BTP forward (tiled, DSMEM/cluster)");
-  m.def("backward", &btp_backward, "BTP backward (tiled, DSMEM/cluster)");
+  m.def("forward", &btp_forward, "BTP forward (tiled, DSMEM/cluster)",
+        py::arg("coeff"), py::arg("x"), py::arg("y"), py::arg("checkpoint"),
+        py::arg("k"), py::arg("wpb"), py::arg("reverse") = false);
+  m.def("backward", &btp_backward, "BTP backward (tiled, DSMEM/cluster)",
+        py::arg("coeff"), py::arg("x"), py::arg("dy"), py::arg("checkpoint"),
+        py::arg("dx"), py::arg("dA"), py::arg("k"), py::arg("wpb"), py::arg("reverse") = false);
 }
