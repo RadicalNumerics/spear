@@ -168,7 +168,7 @@ __global__ void btp_backward_kernel(const ElementT* __restrict__ g_coeff,
                                     const ElementO* __restrict__ g_dy,
                                     const float* __restrict__ g_checkpoint_carry,
                                     ElementT* __restrict__ g_dx, float* __restrict__ g_dA, int L,
-                                    int H, int k, int cluster_size_param) {
+                                    int H, int k, int cluster_size_param, bool reverse) {
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 900)
   if (k == 2) return;  // DSMEM path requires Hopper+.
 #endif
@@ -254,21 +254,24 @@ __global__ void btp_backward_kernel(const ElementT* __restrict__ g_coeff,
   }
 
   const long long bh_idx_ll = static_cast<long long>(bh_idx);
-  const long long coeff_offset = bh_idx_ll * L + l0;
-  const long long x_offset = bh_idx_ll * DH_VAL * L + l0;
+  // Base offsets (without tile position)
+  const long long coeff_base = bh_idx_ll * L;
+  const long long x_base = bh_idx_ll * DH_VAL * L;
+  // Tile-specific offsets (coefficients are NOT reversed)
+  const long long coeff_offset = coeff_base + l0;
+  const long long x_offset = x_base + l0;
   // Assumes L is multiple of BLK for checkpoint offset.
   const long long checkpoint_offset =
       bh_idx_ll * (L / BLK) * DH_VAL + (static_cast<long long>(tile_glob - 1) * DH_VAL);
 
+  // Pointers for coefficient (NOT reversed - defines the operator)
   const ElementT* coeff_tile_ptr = g_coeff + coeff_offset;
-  const ElementT* x_tile_ptr = g_x + x_offset;
-  const ElementO* dy_tile_ptr = g_dy + x_offset;
+  float* dA_tile_ptr = g_dA + coeff_offset;
+
+  // For x, dy, dx: use base pointers and compute reversed indices per-element
   const float* checkpoint_ptr = (tile_glob > 0 && g_checkpoint_carry != nullptr)
                                     ? (g_checkpoint_carry + checkpoint_offset)
                                     : nullptr;
-
-  ElementT* dx_tile_ptr = g_dx + x_offset;
-  float* dA_tile_ptr = g_dA + coeff_offset;
 
 
   // Load Coefficients and calculate log(a_t).
@@ -294,11 +297,13 @@ __global__ void btp_backward_kernel(const ElementT* __restrict__ g_coeff,
     // Use padded stride BLK_P for SMEM writes.
     for (int i = lane; i < DH_VAL * BLK; i += 32) {
       int c = i / BLK;
-      int r = i % BLK;
+      int r = i % BLK;  // local position within tile
       int smem_idx = c * BLK_P + r;
 
       if (l0 + r < L) {
-        warp_smem->X_tile_RM[smem_idx] = x_tile_ptr[static_cast<long long>(c) * L + r];
+        // For reverse mode, read from reversed global positions
+        const long long global_r = reverse ? (L - 1 - (l0 + r)) : (l0 + r);
+        warp_smem->X_tile_RM[smem_idx] = g_x[x_base + static_cast<long long>(c) * L + global_r];
       } else {
         warp_smem->X_tile_RM[smem_idx] = ElementT(0.0f);
       }
@@ -320,12 +325,14 @@ __global__ void btp_backward_kernel(const ElementT* __restrict__ g_coeff,
     // Use padded stride BLK_P for SMEM writes.
     for (int i = lane; i < DH_VAL * BLK; i += 32) {
       int c = i / BLK;
-      int r = i % BLK;
+      int r = i % BLK;  // local position within tile
       int smem_idx = c * BLK_P + r;
 
       if (l0 + r < L) {
+        // For reverse mode, read from reversed global positions
+        const long long global_r = reverse ? (L - 1 - (l0 + r)) : (l0 + r);
         warp_smem->DC_tile_RM_F32[smem_idx] =
-            static_cast<float>(dy_tile_ptr[static_cast<long long>(c) * L + r]);
+            static_cast<float>(g_dy[x_base + static_cast<long long>(c) * L + global_r]);
       } else {
         warp_smem->DC_tile_RM_F32[smem_idx] = 0.0f;
       }
@@ -626,11 +633,13 @@ __global__ void btp_backward_kernel(const ElementT* __restrict__ g_coeff,
     // 3.5 Store dX
     for (int i = lane; i < DH_VAL * BLK; i += 32) {
       int c = i / BLK;
-      int r = i % BLK;
+      int r = i % BLK;  // local position within tile
 
       if (l0 + r < L) {
         float val = DX_T[c * BLK_P + r];
-        dx_tile_ptr[static_cast<long long>(c) * L + r] = static_cast<ElementT>(val);
+        // For reverse mode, write to reversed global positions
+        const long long global_r = reverse ? (L - 1 - (l0 + r)) : (l0 + r);
+        g_dx[x_base + static_cast<long long>(c) * L + global_r] = static_cast<ElementT>(val);
       }
     }
 
@@ -811,7 +820,7 @@ __global__ void btp_backward_kernel(const ElementT* __restrict__ g_coeff,
 template <typename ElementT, typename ElementO, int DH_VAL = 16, int WARPS_PER_BLOCK>
 void launch_btp_backward(const ElementT* coeff, const ElementT* x, const ElementO* dy,
                          const float* checkpoint_carry, ElementT* dx, float* dA, int B, int H,
-                         int L, int k, cudaStream_t stream) {
+                         int L, int k, bool reverse, cudaStream_t stream) {
   if (L <= 0 || B * H <= 0) return;
 
   constexpr int BLK = BL;
@@ -880,7 +889,7 @@ void launch_btp_backward(const ElementT* coeff, const ElementT* x, const Element
                                     (const void*)kernel_ptr,
                                     // Kernel arguments:
                                     coeff, x, dy, checkpoint_carry, dx, dA, L, H, k,
-                                    int(cluster_dims.x));  // Pass cluster size
+                                    int(cluster_dims.x), reverse);  // Pass cluster size and reverse flag
 }
 
 //  Explicit Template Instantiations
@@ -890,7 +899,7 @@ using bf16 = cutlass::bfloat16_t;
 #define INSTANTIATE_BTP_BWD(T, O, DH_VAL, WPB)                                                  \
   template void launch_btp_backward<T, O, DH_VAL, WPB>(                                         \
       const T* coeff, const T* x, const O* dy, const float* checkpoint_carry, T* dx, float* dA, \
-      int B, int H, int L, int k, cudaStream_t stream);
+      int B, int H, int L, int k, bool reverse, cudaStream_t stream);
 
 // Instantiating various WPB configurations. WPB=8 or 16 is often optimal for
 // this kernel.

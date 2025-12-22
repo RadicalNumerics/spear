@@ -15,7 +15,17 @@ import torch
 
 from einops import rearrange, repeat
 
-__all__ = ["block_two_pass_ref", "block_two_pass_log"]
+__all__ = [
+    # Causal BTP
+    "block_two_pass_ref",
+    "block_two_pass_log",
+    "block_two_pass_linspace",
+    # Bidirectional BTP
+    "block_two_pass_bidir",
+    "block_two_pass_bidir_ref",
+    "block_two_pass_bidir_log",
+    "construct_L_bidir",
+]
 
 
 def segsum(x):
@@ -76,6 +86,7 @@ def construct_L_ref(a):
     L = L.to(a_type)
     return L
 
+
 def construct_L_masked_cumprod(
     x: torch.Tensor,
 ) -> torch.Tensor:
@@ -88,6 +99,7 @@ def construct_L_masked_cumprod(
     upper = torch.triu(torch.ones_like(P, dtype=torch.bool), diagonal=1)
     L = P.masked_fill(upper, 0.0)
     return L
+
 
 def construct_L_cumprod_ratio(x):
     """Build L via ratio of cumprod in linear space."""
@@ -152,4 +164,78 @@ def block_two_pass_linspace(a, u, BL=16):
     return block_two_pass(a, u, construct_L_masked_cumprod, BL)
 
 
-__all__ = ["block_two_pass_ref", "block_two_pass_log", "block_two_pass_linspace"]
+# =============================================================================
+# Bidirectional BTP
+# =============================================================================
+
+
+def construct_L_bidir(
+    a_f: torch.Tensor,
+    a_b: torch.Tensor | None,
+    L_constructor,
+    alpha: float = 1.0,
+    beta: float = 1.0,
+) -> torch.Tensor:
+    """Construct bidirectional operator: L_bidir = α·L_f + β·R·L_b·R - (α+β-1)·I"""
+    L_dim = a_f.shape[-1]
+    device = a_f.device
+    dtype = a_f.dtype
+
+    L_f = L_constructor(a_f)
+    a_b_eff = a_b if a_b is not None else a_f
+    L_b_base = L_constructor(a_b_eff)
+
+    R = torch.eye(L_dim, device=device, dtype=dtype).flip(0)
+    L_a = R @ L_b_base @ R
+
+    eye = torch.eye(L_dim, device=device, dtype=dtype)
+    eye = eye.expand(*L_f.shape[:-2], L_dim, L_dim)
+
+    return alpha * L_f + beta * L_a - (alpha + beta - 1.0) * eye
+
+
+def block_two_pass_bidir(
+    a_f: torch.Tensor,
+    a_b: torch.Tensor | None,
+    u: torch.Tensor,
+    L_constructor,
+    BL: int = 16,
+    alpha: float = 1.0,
+    beta: float = 1.0,
+) -> torch.Tensor:
+    """Bidirectional BTP: y = α·L_f·u + β·R·L_b·R·u - (α+β-1)·u"""
+    x_f = block_two_pass(a_f, u, L_constructor, BL)
+
+    a_b_eff = a_b if a_b is not None else a_f
+    u_rev = u.flip(-1)  # time-reversal
+    x_b_rev = block_two_pass(a_b_eff, u_rev, L_constructor, BL)
+    x_b = x_b_rev.flip(-1)  # time-reversal
+
+    return alpha * x_f + beta * x_b - (alpha + beta - 1.0) * u
+
+
+def block_two_pass_bidir_ref(
+    a_f: torch.Tensor,
+    a_b: torch.Tensor | None,
+    u: torch.Tensor,
+    BL: int = 16,
+    alpha: float = 1.0,
+    beta: float = 1.0,
+) -> torch.Tensor:
+    """Double-precision reference for gradcheck."""
+    assert u.dtype == a_f.dtype == torch.float64
+    if a_b is not None:
+        assert a_b.dtype == torch.float64
+    return block_two_pass_bidir(a_f, a_b, u, construct_L_ref, BL, alpha, beta)
+
+
+def block_two_pass_bidir_log(
+    a_f: torch.Tensor,
+    a_b: torch.Tensor | None,
+    u: torch.Tensor,
+    BL: int = 16,
+    alpha: float = 1.0,
+    beta: float = 1.0,
+) -> torch.Tensor:
+    """Log-space stable bidirectional BTP."""
+    return block_two_pass_bidir(a_f, a_b, u, construct_L_exp_segsum_log_stable, BL, alpha, beta)

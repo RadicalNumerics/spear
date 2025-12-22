@@ -5,8 +5,9 @@
 
 """Block Two-Pass (BTP) operator package."""
 
-from .interface import btp
+from .interface import btp, btp_bidir
 
 __all__ = [
     "btp",
+    "btp_bidir",
 ]
